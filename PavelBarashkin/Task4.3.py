@@ -27,7 +27,7 @@ def split_imitate(string, separator=" ", maxsplit=-1):
             if char == separator:
                 result.append(string[start_index:index])
                 start_index = index + 1
-        if start_index <= len(string):
+        if start_index < len(string):
             result.append(string[start_index:])
 
     else:
@@ -37,7 +37,7 @@ def split_imitate(string, separator=" ", maxsplit=-1):
             if string[index:index + len(separator)] == separator:
                 result.append(string[start_index:index])
                 start_index = index + len(separator)
-        if start_index <= len(string):
+        if start_index < len(string):
             result.append(string[start_index:])
     return result
 
