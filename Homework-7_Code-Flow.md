@@ -14,13 +14,16 @@ Implement decorator with context manager support for writing execution time to l
 Implement decorator for supressing exceptions. If exception not occure write log to console.
 
 ### Task 7.5
-Implement function for check that number is even, at least 3. Throw different exceptions for this errors. Custom exceptions must be derived from custom base exception(not Base Exception class).
+Implement function for check that number is even and is greater than 2. Throw different exceptions for this errors. Custom exceptions must be derived from custom base exception(not Base Exception class).
 
 ### Task 7.6
 Create console program for proving Goldbach's conjecture. Program accepts number for input and print result. For pressing 'q' program succesfully close. Use function from Task 5.5 for validating input, handle all exceptions and print user friendly output.
 
 ### Task 7.7
-Implement your custom collection called MyNumberCollection. It should be able to contain only numbers. It should NOT inherit any other collections.
+Implement your custom collection called MyNumberCollection. It should be able to contain only numbers. It should NOT inheImplement function for check that number is even, at least 3. Throw different exceptions for this errors. Custom exceptions must be derived from custom base exception(not Base Exception class).
+19
+ 
+rit any other collections.
 If user tries to add a string or any non numerical object there, exception `TypeError` should be raised. Method init sholud be able to take either 
 `start,end,step` arguments, where `start` - first number of collection, `end` - last number of collection or some ordered iterable 
 collection (see the example).
