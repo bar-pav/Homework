@@ -4,7 +4,6 @@ import io
 import json
 import re
 from requests import request
-from requests.exceptions import HTTPError
 import sys
 
 """Iteration"""
@@ -29,15 +28,28 @@ class InvalidSourceURL(Exception):
     pass
 
 
+class RequestError(Exception):
+    """Error while request data from source."""
+
+
 def validating_url(source):
     """Check that received source URL is not empty and starts with http."""
     if source:
         if source.startswith('http://') or source.startswith('https://'):
             return True
         else:
-            raise InvalidSourceURL(f"Invalid source URL '{source}'. It must starts with http:// or https://")
+            raise InvalidSourceURL(f"Invalid source URL '{source}'. Did you meant https://{source}")
     else:
         raise InvalidSourceURL(f"Source URL can't be empty.")
+
+
+def get_data_from_source(source):
+    try:
+        response = request("GET", source)
+    except Exception:
+        raise RequestError(f"Error occurred while receiving data from '{source}'.")
+    else:
+        return response
 
 
 def get_tag_content(element, tag_name):
@@ -52,18 +64,17 @@ def get_tag_content(element, tag_name):
 def print_news(dump):
     """Print given news topics in stdout"""
     if not dump:
-        print("Empty object")
         return
     try:
         print("Feed:", dump["feed"], '\n')
         for item_num, item in enumerate(dump["news"], 1):
             print(f"{item_num:4} " + '-' * 80, "\n")
-            print("Title:", item["title"] or "Topic has no title")
-            print("Date:", item["date"] or "Topic has no publication date")
-            print("Link:", item["link"] or "Topic has no link")
+            print("Title: ", item["title"] or "Topic has no title")
+            print(" Date: ", item["date"] or "Topic has no publication date")
+            print(" Link: ", item["link"] or "Topic has no link")
             if item["description"]:
                 print()
-                print("Description:", item["description"])
+                print("Description:\n", item["description"])
                 print()
             if item["links"]:
                 print("Links:")
@@ -84,19 +95,10 @@ def parse_url(source, limit=None):
     """
     validating_url(source)
     print(f"Receiving data from '{source}' ...")
-    response = None
-    try:
-        response = request("GET", source)
-        response.raise_for_status()
-    except HTTPError as he:
-        print(f"HTTP error occurred while receiving data from '{source}': {he}.")
-    except Exception as exc:
-        print(f"Exception occurred while receiving data from '{source}': {exc}.")
-        raise
-    else:
-        print(f"Data was received successfully from '{source}'.")
+    response = get_data_from_source(source)
+    print(f"Data was received successfully from '{source}'.")
     bs = BeautifulSoup(response.content, "xml")
-    rss = bs.find('rss')   # Check if the resource contains rss
+    rss = bs.find('rss')
     if rss:
         rss_channel = rss.find("channel")
         resource_info = rss_channel.find("description").get_text()
@@ -140,7 +142,8 @@ def parse_url(source, limit=None):
         raise NotRSSSource(f"Resource '{source}' has no RSS content")
 
 
-if __name__ == "__main__":
+def main():
+    """Main function. Handle command-line arguments."""
     stdout = sys.stdout
     buffer = io.StringIO()
     sys.stdout = stdout if ap_namespace.verbose else buffer
@@ -154,3 +157,7 @@ if __name__ == "__main__":
             print(json.dumps(news, ensure_ascii=False, indent=4))
         else:
             print_news(news)
+
+
+if __name__ == "__main__":
+    main()
