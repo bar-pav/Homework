@@ -7,15 +7,7 @@ from requests import request
 import sys
 
 """Iteration"""
-VERSION = "1.1"
-
-ap = argparse.ArgumentParser(prog="rss_reader.py", description="Pure Python command-line RSS reader")
-ap.add_argument('source', type=str, help="RSS URL")
-ap.add_argument('--version', action="version", help="Print version info", version=f"Version {VERSION}")
-ap.add_argument('--json', action="store_true", help="Print result as JSON in stdout")
-ap.add_argument('--verbose', action="store_true", help="Outputs verbose status messages")
-ap.add_argument('--limit', type=int, default=None, help="Limit news topics if this parameter provided")
-ap_namespace = ap.parse_args()
+VERSION = "1.2"
 
 
 class NotRSSSource(Exception):
@@ -30,11 +22,12 @@ class InvalidSourceURL(Exception):
 
 class RequestError(Exception):
     """Error while request data from source."""
+    pass
 
 
 def validating_url(source):
     """Check that received source URL is not empty and starts with http."""
-    if source:
+    if source and source != 'http://' and source != 'https://':
         if source.startswith('http://') or source.startswith('https://'):
             return True
         else:
@@ -44,16 +37,11 @@ def validating_url(source):
 
 
 def get_data_from_source(source):
-    try:
-        response = request("GET", source)
-    except Exception:
-        raise RequestError(f"Error occurred while receiving data from '{source}'.")
-    else:
-        return response
+    return request("GET", source)
 
 
 def get_tag_content(element, tag_name):
-    """Return tag text content if it contain."""
+    """Return the text content of tag if it contain."""
     tag = element.find(tag_name)
     if tag:
         return tag.get_text()
@@ -66,28 +54,27 @@ def print_news(dump):
     if not dump:
         return
     try:
-        print("Feed:", dump["feed"], '\n')
-        for item_num, item in enumerate(dump["news"], 1):
-            print(f"{item_num:4} " + '-' * 80, "\n")
-            print("Title: ", item["title"] or "Topic has no title")
-            print(" Date: ", item["date"] or "Topic has no publication date")
-            print(" Link: ", item["link"] or "Topic has no link")
-            if item["description"]:
+        for source_url, source_dump in dump.items():
+            print("\n{:#^100}".format(" " + source_url + " "))
+            print("\n{:>12}: {}".format('Feed', source_dump['source_info']))
+            for item_num, item in enumerate(source_dump['source_news'], 1):
                 print()
-                print("Description:\n", item["description"])
-                print()
-            if item["links"]:
-                print("Links:")
-            for i, lnk in enumerate(item["links"], 1):
-                print(i, lnk)
-            print()
+                print("{:>12}| {}".format('Topic ' + str(item_num), item["title"] or "Topic has no title"))
+                print("{:>12}| {}".format('Date', item["pubdate"] or "Topic has no publication date"))
+                if item["links"]:
+                    print("{:>12}| {}".format('Link', item["links"].pop(0)))
+                if item["description"]:
+                    print("{:>12}: {}".format('Description', item["description"]), "\n")
+                if item["links"]:
+                    print("{:>12}:".format("Links"))
+                    for i, lnk in enumerate(item["links"], 1):
+                        print("{:14} {}".format(i, lnk))
     except KeyError as k:
         print(f"Object has incorrect structure for printing: {k}.")
 
 
 def parse_url(source, limit=None):
     """Retrieves news topics from the given URL.
-
     Attributes:
         - source -- URL address of RSS resource.
         - limit -- The number of news topics which will be returned. If not specified,
@@ -101,7 +88,7 @@ def parse_url(source, limit=None):
     rss = bs.find('rss')
     if rss:
         rss_channel = rss.find("channel")
-        resource_info = rss_channel.find("description").get_text()
+        resource_info = rss_channel.find("description").get_text() or rss_channel.find("title").get_text()
         items = rss_channel.findAll('item')
         parsed_items_list = []
         if items:
@@ -119,24 +106,20 @@ def parse_url(source, limit=None):
                     lnk = tag.get("url", None) or tag.get("href", None) or tag.get("src", None)
                     if lnk and lnk not in links:
                         links.append(lnk)
-                description = get_tag_content(item, "description")
-                if description:
-                    description_links = re.findall(r"(http.*?)[>\s\"']", description)
+                raw_description = description = get_tag_content(item, "description")
+                if raw_description:
+                    description_links = re.findall(r"(http.*?)[>\s\"']", raw_description)
                     links.extend(lnk for lnk in description_links if lnk not in links)
-                    description = BeautifulSoup(description, "lxml")
-                    description_tags = description.find_all(True)
-                    if description_tags:
-                        description = description.get_text()
+                    description = BeautifulSoup(raw_description, 'lxml').get_text()
 
                 item_content = {
                     "title": title,
-                    "date": pubdate,
-                    "link": link,
+                    "pubdate": pubdate,
                     "description": description,
-                    "links": links,
+                    "links": links
                 }
                 parsed_items_list.append(item_content)
-        dump = {"feed": resource_info, "news": parsed_items_list}
+        dump = {source: {'source_news': parsed_items_list, 'source_info': resource_info}}
         return dump
     else:
         raise NotRSSSource(f"Resource '{source}' has no RSS content")
@@ -144,20 +127,25 @@ def parse_url(source, limit=None):
 
 def main():
     """Main function. Handle command-line arguments."""
+    arg_parser = argparse.ArgumentParser(prog="rss_reader.py", description="Pure Python command-line RSS reader")
+    arg_parser.add_argument('source', type=str, help="RSS URL",)
+    arg_parser.add_argument('--version', action="version", help="Print version info", version=f"Version {VERSION}")
+    arg_parser.add_argument('--json', action="store_true", help="Print result as JSON in stdout")
+    arg_parser.add_argument('--verbose', action="store_true", help="Outputs verbose status messages")
+    arg_parser.add_argument('--limit', type=int, default=None, help="Limit news topics if this parameter provided")
+    cli_arguments = arg_parser.parse_args()
+
     stdout = sys.stdout
     buffer = io.StringIO()
-    sys.stdout = stdout if ap_namespace.verbose else buffer
+    sys.stdout = stdout if cli_arguments.verbose else buffer
     try:
-        news = parse_url(ap_namespace.source, limit=ap_namespace.limit)
+        news = parse_url(cli_arguments.source, limit=cli_arguments.limit)
     except Exception as e:
+        sys.stdout = stdout
         print(e)
     else:
         sys.stdout = stdout
-        if ap_namespace.json:
+        if cli_arguments.json:
             print(json.dumps(news, ensure_ascii=False, indent=4))
         else:
             print_news(news)
-
-
-if __name__ == "__main__":
-    main()
