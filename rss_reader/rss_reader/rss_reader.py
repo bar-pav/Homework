@@ -136,7 +136,8 @@ class RSSReader:
                     print()
                     print("{:>12}| {}".format('Topic ' + str(item_num), item["title"] or "Topic has no title"))
                     print("{:>12}| {}".format('Date', item["pubdate"] or "Topic has no publication date"))
-                    print("{:>12}| {}".format('Link', item["links"].pop(0) or "Topic has no link"))
+                    if item["links"]:
+                        print("{:>12}| {}".format('Link', item["links"].pop(0) or "Topic has no link"))
                     if item["description"]:
                         print("{:>12}: {}".format('Description', item["description"]))
                     if item["links"]:
