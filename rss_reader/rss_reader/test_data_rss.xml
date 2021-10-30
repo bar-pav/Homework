@@ -1,0 +1,31 @@
+<rss xmlns:content="http://purl.org/rss/1.0/modules/content/" xmlns:wfw="http://wellformedweb.org/CommentAPI/" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:media="http://search.yahoo.com/mrss/" xmlns:atom="http://www.w3.org/2005/Atom" version="2.0">
+<channel>
+<title>TEST TITLE</title>
+<link>http://TEST-LINK/</link>
+<description>TEST CHANNEL DESCRIPTION</description>
+<pubDate>Sun, 24 Oct 2021 12:00:00 +0300</pubDate>
+<image>
+<url>http://TEST-LINK/rss/logo.png</url>
+<width>144</width>
+<height>32</height>
+<title>TEST IMAGE TITLE</title>
+<link>http://TEST-IMAGE-LINK/</link>
+</image>
+<atom:link href="http://TEST-LINK" rel="self" type="application/rss+xml"/>
+<item>
+<title>
+<![CDATA[ TEST ITEM TITLE ]]>
+</title>
+<link>https://TEST-LINK</link>
+<pubDate>Sun, 24 Oct 2021 12:00:00 +0300</pubDate>
+<category>
+<![CDATA[ TEST ]]>
+</category>
+<guid isPermaLink="false">https://TEST-LINK</guid>
+<description>
+<![CDATA[ <p><a href="https://TEST-DESCRIPTION-LINK"><img src="https://TEST-DESCRIPTION-LINK.jpeg" alt="" /></a></p><p>TEST DESCRIPTION</p><p><a href="https://TEST-DESCRIPTION-LINK>Читать далее…</a></p> ]]>
+</description>
+<media:thumbnail url="https://TEST-DESCRIPTION-LINK.jpeg"/>
+</item>
+</channel>
+</rss>

@@ -9,11 +9,15 @@ import re
 from requests import request
 import sqlite3
 import sys
-
+from contextlib import redirect_stderr
+from xhtml2pdf import pisa
 
 """Iteration"""
-VERSION = "1.3"
+VERSION = "1.4"
+
 db_path = "cached_news.db"
+html_result_file = "news.html"
+pdf_result_file = "news.pdf"
 
 
 class NotRSSSource(Exception):
@@ -38,13 +42,16 @@ class NoNewsForDate(Exception):
 
 class RSSReader:
     """RSSReader class.  Creates an object that includes a list of news items retrieved from source URL.
-       and methods for presenting them based on command line arguments passed during creating of instance.
+       and methods for presenting them based on command line arguments passed when creating of instance.
     """
     def __init__(self, cli_arguments):
-        self.arg_url = cli_arguments.source
-        self.arg_limit = cli_arguments.limit
-        self.arg_date = cli_arguments.date
-        if self.arg_date:
+        self._arg_url = cli_arguments.source
+        self._arg_limit = cli_arguments.limit
+        self._arg_date = cli_arguments.date
+        self._arg_to_html = cli_arguments.to_html
+        self._arg_to_pdf = cli_arguments.to_pdf
+        self._html_template = None
+        if self._arg_date:
             self.news = self.fetch_news_from_cache()
         else:
             self.validating_url()
@@ -54,23 +61,24 @@ class RSSReader:
 
     def validating_url(self):
         """Check that received source URL is not empty and starts with http."""
-        if self.arg_url and self.arg_url != 'http://' and self.arg_url != 'https://':
-            if self.arg_url.startswith('http://') or self.arg_url.startswith('https://'):
+
+        if self._arg_url and self._arg_url != 'http://' and self._arg_url != 'https://':
+            if self._arg_url.startswith('http://') or self._arg_url.startswith('https://'):
                 return True
             else:
-                raise InvalidSourceURL(f"Invalid source URL '{self.arg_url}'. Did you meant https://{self.arg_url}")
+                raise InvalidSourceURL(f"Invalid source URL '{self._arg_url}'")
         else:
             raise InvalidSourceURL(f"Source URL can't be empty.")
 
     def get_data_from_source(self):
         """Sends a request and return response object"""
-        print(f"Receiving data from '{self.arg_url}' ...")
+        print(f"Receiving data from '{self._arg_url}' ...")
         try:
-            response = request("GET", self.arg_url)
+            response = request("GET", self._arg_url, headers={'User-agent': 'Mozilla/5.0'}, timeout=10)
         except Exception:
-            raise RequestError(f"Error occurred while receiving data from '{self.arg_url}'.")
+            raise RequestError(f"Error occurred while receiving data from '{self._arg_url}'.")
         else:
-            print(f"Data was received successfully from '{self.arg_url}'.")
+            print(f"Data was received successfully from '{self._arg_url}'.")
             return response
 
     @classmethod
@@ -83,19 +91,24 @@ class RSSReader:
             return None
 
     def parse_response(self):
-        """Retrieves news topics from the self.response."""
+        """Retrieves news topics from the response of request.
+
+        """
         bs = BeautifulSoup(self.response.content, "xml")
         rss = bs.find('rss')
         if rss:
             rss_channel = rss.find("channel")
-            resource_info = rss_channel.find("description").get_text() or rss_channel.find("title").get_text()
+            rss_channel_title = rss_channel.find("title").get_text()
+            rss_channel_description = rss_channel.find("description").get_text()
+            resource_info = ". ".join([rss_channel_title, (rss_channel_description if
+                                                           rss_channel_description != rss_channel_title else "")])
             items = rss_channel.findAll('item')
             parsed_items_list = []
             if items:
                 print("Resource has {} news topics. {}".
-                      format(len(items), f"Display limit: {self.arg_limit}" if self.arg_limit else ""), '\n')
-                if self.arg_limit is not None and self.arg_limit >= 0:
-                    items = items[:self.arg_limit]
+                      format(len(items), f"Display limit: {self._arg_limit}" if self._arg_limit else ""), '\n')
+                if self._arg_limit is not None and self._arg_limit >= 0:
+                    items = items[:self._arg_limit]
                 for item in items:
                     title = self.get_tag_content(item, "title")
                     pubdate = self.get_tag_content(item, 'pubDate')
@@ -110,7 +123,7 @@ class RSSReader:
                     if raw_description:
                         description_links = re.findall(r"(http.*?)[>\s\"']", raw_description)
                         links.extend(lnk for lnk in description_links if lnk not in links)
-                        raw_description = BeautifulSoup(raw_description, 'lxml').get_text()
+                        # raw_description = BeautifulSoup(raw_description, 'lxml').get_text()
 
                     item_content = {
                         "title": title,
@@ -119,10 +132,13 @@ class RSSReader:
                         "links": links
                     }
                     parsed_items_list.append(item_content)
-            dump = {self.arg_url: {'source_news': parsed_items_list, 'source_info': resource_info}}
+            dump = {self._arg_url: {'source_news': parsed_items_list,
+                                    'source_info': resource_info,
+                                    }
+                    }
             return dump
         else:
-            raise NotRSSSource(f"Resource '{self.arg_url}' has no RSS content")
+            raise NotRSSSource(f"Resource '{self._arg_url}' has no RSS content")
 
     def print_news(self):
         """Print given news topics in stdout"""
@@ -139,7 +155,7 @@ class RSSReader:
                     if item["links"]:
                         print("{:>12}| {}".format('Link', item["links"].pop(0) or "Topic has no link"))
                     if item["description"]:
-                        print("{:>12}: {}".format('Description', item["description"]))
+                        print("{:>12}: {}".format('Description', BeautifulSoup(item["description"], 'lxml').get_text()))
                     if item["links"]:
                         print("{:>12}:".format("Links"))
                         for i, lnk in enumerate(item["links"], 1):
@@ -149,6 +165,12 @@ class RSSReader:
 
     def print_json(self):
         """Prints news in json format in stdout."""
+        for source in self.news.keys():
+            for item in self.news[source]["source_news"]:
+                if item["description"]:
+                    item["description"] = BeautifulSoup(item["description"], 'lxml').get_text()
+                else:
+                    continue
         print(json.dumps(self.news, ensure_ascii=False, indent=4))
 
     def cache_news(self):
@@ -171,7 +193,7 @@ class RSSReader:
                                 CONSTRAINT unique_source UNIQUE (source_url, source_info)
                                 );""")
             cursor.execute("""CREATE TABLE IF NOT EXISTS news (
-                                id integer PRIMARY KEY AUTOINCREMENT,
+                                id integer PRIMARY KEY,
                                 date varchar(255),
                                 source_id integer,
                                 item_json text,
@@ -179,6 +201,12 @@ class RSSReader:
                                 FOREIGN KEY (source_id) REFERENCES source(id)
                                 );""")
         print("\t\tCaching news\n\t\t...")
+
+        next_id = cursor.execute("""SELECT id FROM news ORDER BY id DESC LIMIT 1""").fetchone()
+        if next_id:
+            next_id = next_id[0] + 1
+        else:
+            next_id = 1
         for source, source_dump in self.news.items():
             source_exist = cursor.execute("""SELECT * FROM source WHERE source_url=(?)""", (source,)).fetchone()
             if source_exist:
@@ -190,10 +218,11 @@ class RSSReader:
             connection.commit()
             for item in source_dump['source_news'][::-1]:
                 date = date_parser.parse(item["pubdate"]) if item["pubdate"] else utils.today()
-                cursor.execute("""INSERT OR IGNORE INTO news (date, source_id, item_json)
-                                    VALUES (?, ?, ?)""", (date.strftime("%Y%m%d"),
-                                                          source_id,
-                                                          json.dumps(item, ensure_ascii=False)))
+                added_id = cursor.execute("""INSERT OR IGNORE INTO news (id, date, source_id, item_json)
+                                    VALUES (?, ?, ?, ?)""", (next_id, date.strftime("%Y%m%d"),
+                                                             source_id,
+                                                             json.dumps(item, ensure_ascii=False)))
+                next_id = (added_id.lastrowid + 1) if added_id else next_id
         connection.commit()
         print("\t\tNews saved in local DB.")
         print("\tClosing connection to DB...")
@@ -207,22 +236,22 @@ class RSSReader:
             print("\tConnecting to DB ...")
             connection = sqlite3.connect(db_path)
             print("\tConnection OK.")
-            print(f"\t\tFetching news for the date '{self.arg_date}'" +
-                  (f" for source '{self.arg_url}'" if self.arg_url else ""), "\n\t\t...")
+            print(f"\t\tFetching news for the date '{self._arg_date}'" +
+                  (f" for source '{self._arg_url}'" if self._arg_url else ""), "\n\t\t...")
             cursor = connection.cursor()
             dump = {}
-            select_query = (f"""SELECT {'source.source_url,' if not self.arg_url else ''} news.item_json 
+            select_query = (f"""SELECT {'source.source_url,' if not self._arg_url else ''} news.item_json 
                             FROM news JOIN source ON news.source_id = source.id WHERE news.date=(?) 
-                            {'and source.source_url=(?)' if self.arg_url else ''} ORDER BY news.id DESC""",
-                            (self.arg_date, self.arg_url) if self.arg_url else (self.arg_date,))
-            select_result = cursor.execute(*select_query).fetchall()[:self.arg_limit]
+                            {'and source.source_url=(?)' if self._arg_url else ''} ORDER BY news.id DESC""",
+                            (self._arg_date, self._arg_url) if self._arg_url else (self._arg_date,))
+            select_result = cursor.execute(*select_query).fetchall()[:self._arg_limit]
             print(f"\t\tFetched {len(select_result)} news from local DB.")
             if not select_result:
-                raise NoNewsForDate(f"No news for the date '{self.arg_date}' in cache.")
-            if self.arg_url:
-                dump[self.arg_url] = []
+                raise NoNewsForDate(f"No news for the date '{self._arg_date}' in cache.")
+            if self._arg_url:
+                dump[self._arg_url] = []
                 for item in select_result:
-                    dump[self.arg_url].append(json.loads(item[0]))
+                    dump[self._arg_url].append(json.loads(item[0]))
             else:
                 for item in select_result:
                     dump[item[0]] = dump.get(item[0], [])
@@ -240,16 +269,119 @@ class RSSReader:
         else:
             raise NoNewsForDate("No cached news yet.")
 
+    def convert2html(self, to_file=True):
+        """Save news as html file."""
+        def create_html_links(links):
+            """Creates a <ul> tag with a list of passed links"""
+            if links:
+                links_list = []
+                for link in links:
+                    links_list.append(f"<a href={link}>{link if len(link) < 50 else link[:50] + '...'}</a>")
+                return f"""<ul>Links:<li>
+                            {'</li><li>'.join(link for link in links_list)}
+                        </li>
+                    </ul>"""
+
+        def create_html_item(item):
+            """Creates block for one news"""
+            return f"""\n<div class="item">
+                             <div class="title"><h3>{item["title"] or ""}</h3></div>
+                             <div class="item_content">
+                                 <div class="pubdate"><h6>{item["pubdate"] or ""}</h6></div>
+                                 <div class="description">{item["description"] or ""}</div>
+                                 <div class="links"> {create_html_links(item["links"])} </div>
+                             </div>
+                         </div>"""
+
+        font_path_windows = "C:\\Windows\\Fonts\\Calibri.ttf"
+        font_path_linux = "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf"
+        font_path_linux_bold = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf"
+        font_path_linux_italic = "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Oblique.ttf"
+
+        def create_style_tag(with_borders=True):
+            """Returns a style tag with a different border decoration of the item tag,
+                depending on the format of saving the document"""
+            return f"""<style>
+                            @font-face {{ font-family: DejaVuSans; 
+                                          src: url({font_path_windows if sys.platform == 'win32' else font_path_linux});}}
+                            @font-face {{ font-family: DejaVuSans; 
+                                          src: url({font_path_windows if sys.platform == 'win32' else font_path_linux_bold}); 
+                                          font-weight: bold; }}
+                            @font-face {{ font-family: DejaVuSans; 
+                                          src: url({font_path_windows if sys.platform == 'win32' else font_path_linux_italic}); 
+                                          font-style: italic; }}
+                            .source_info {{ font-size: 2em; 
+                                            margin-top: 1.2em;
+                                            margin-bottom: 1.2em;
+                                            width: 80%;
+                                            margin-left: auto;
+                                            margin-right: auto; 
+                                            }}
+                            .item {{ display: block;
+                                     margin: 5px;
+                                     padding: 10px;
+                                     width: 50%;
+                                     margin-left: auto;
+                                     margin-right: auto;
+                                     {"border: 2px solid #e4e1e1; border-radius: 10px;" if with_borders else ""}
+                              }}
+                            .title {{ font-weight: bold; }}
+                            .item_content {{ margin-left: 25px; margin-bottom: 0px; padding: 0px; }}
+                            .pubdate {{ font-size: 0.6; margin-top: 0px; padding: 0px; }}
+                            .description img {{ width: 100%; }}
+                            .links {{ width: 100%; }}
+                            html {{ font-family: "DejaVuSans"; }}
+                            h3 {{ margin: 0px; padding: 5px; }}
+                            h6 {{ margin-top: 0px; padding: 0px; }}   
+                        </style>"""
+        if not self._html_template:
+            all_sources = []
+            for source in self.news.keys():
+                one_source_news_html = f"""<div class="channel">
+                                                <div class="source_info">{self.news[source]["source_info"]}</div>
+                                                    {"".join(create_html_item(item) 
+                                                             for item in self.news[source]["source_news"])}
+                                           </div>"""
+                all_sources.append(one_source_news_html)
+            html_template = f"""<!DOCTYPE html>
+                                <html>
+                                   <head>
+                                        <meta charset=utf-8">
+                                        {{style_tag}}
+                                      <title>RSS Reader</title>
+                                   </head>
+                                   <body>
+                                   {''.join(source for source in all_sources)}
+                                   </body>
+                                </html>"""
+            self._html_template = html_template
+        if to_file:
+            with open(html_result_file, 'w') as f:
+                f.write(self._html_template.format(style_tag=create_style_tag(True)))
+        else:
+            return self._html_template.format(style_tag=create_style_tag(False))
+
+    def convert2pdf(self):
+        """Convert HTML template to PDF"""
+        with redirect_stderr(None):
+            result_file = open(pdf_result_file, "w+b")
+            pisa.CreatePDF(
+                self.convert2html(False),
+                dest=result_file, encoding='utf-8')
+            result_file.close()
+
 
 def parse_cli_arguments():
-    """Creates ArgumentParser instance and add command line attributes to it."""
+    """Creates ArgumentParser instance and add attributes to it."""
     arg_parser = argparse.ArgumentParser(prog="rss_reader.py", description="Pure Python command-line RSS reader")
-    arg_parser.add_argument('source', type=str, nargs='?', default="", help="RSS URL",)
+    arg_parser.add_argument('source', type=str, nargs='?', help="Input RSS URL. Must start with 'http[s]://'")
     arg_parser.add_argument('--version', action="version", help="Print version info", version=f"Version {VERSION}")
     arg_parser.add_argument('--json', action="store_true", help="Print result as JSON in stdout")
     arg_parser.add_argument('--verbose', action="store_true", help="Outputs verbose status messages")
     arg_parser.add_argument('--limit', type=int, default=None, help="Limit news topics if this parameter provided")
-    arg_parser.add_argument('--date', type=str, default=None, help="Retrieves news for the date, %Y%m%d")
+    arg_parser.add_argument('--date', type=str, default=None, help="Retrieves news for the date, format: 'YYYYMMDD'")
+    arg_parser.add_argument('--to-html', action="store_true", help="Save result in HTML file")
+    arg_parser.add_argument('--to-pdf', action="store_true", help="Save result in PDF file")
     return arg_parser
 
 
@@ -260,16 +392,18 @@ def main():
         arg_parse.print_usage()
         return
     cli_arguments = arg_parse.parse_args()
-    stdout = sys.stdout
-    buffer = io.StringIO()
-    sys.stdout = stdout if cli_arguments.verbose else buffer
+    sys.stdout = sys.__stdout__ if cli_arguments.verbose else io.StringIO()
     try:
         reader = RSSReader(cli_arguments)
+        if cli_arguments.to_html:
+            reader.convert2html()
+        if cli_arguments.to_pdf:
+            reader.convert2pdf()
     except Exception as e:
-        sys.stdout = stdout
+        sys.stdout = sys.__stdout__
         print(e)
     else:
-        sys.stdout = stdout
+        sys.stdout = sys.__stdout__
         if cli_arguments.json:
             reader.print_json()
         else:

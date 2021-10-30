@@ -1,33 +1,92 @@
-# Homework
-Homework for EPAM Python Training 2021.09
+EPAM Python Training 2021.09 Final Task - Python RSS-reader
 
-# How to push tasks into github repo
 
-1. Create fork from the following repo: https://github.com/E-P-T/Homework. (Docs: https://docs.github.com/en/get-started/quickstart/fork-a-repo )
-1. Clone your forked repo in your local folder. 
-1. Create separate branches for each session.Example(session_2, session_3 and so on)      
-1. Create folder with you First and Last name in you forked repo in the created session.
-1. Add your task into created folder
-1. Push finished session task in the appropriate branch in accordance with written above.    
- You should get the structure that looks something like that
+RSS-reader is a pure Python command-line utility on python 3.9 version. 
+It receives RSS URL and prints results in human-readable format.
+An example of format of the news console output:
+
+```shell
+$ python rss_reader.py https://www.onliner.by/feed
+
+################################### https://www.onliner.by/feed ####################################
+
+        Feed: Onliner. 
+
+     Topic 1|  Подбежал, сделал замах, отбежал. В Гомеле подрались таксист и пешеход-«боксер»
+        Date| Sat, 30 Oct 2021 18:14:44 +0300
+        Link| https://auto.onliner.by/2021/10/30/v-gomele-podralis-taksist-i-peshexod-bokser
+ Description: Не смогли мирно разойтись по своим сторонам водитель такси и… нет, не пассажир, а пешеход. Конфликт двух мужчин произошел в четверг, 28 октября. Видео рукопашного боя появилось в группе «ЧП. Гомель». И вам стоит посмотреть этот ролик. Читать далее…
+       Links:
+             1 https://content.onliner.by/news/thumbnail/6982f44cd2b92a3184e95121ae0371d3.jpeg
+             2 https://vk.com/gomelchp?w=wall-131126363_267004
 ```
- Branch: Session_2  
-        DzmitryKolb
-             |___ Task1.py            
-             |___ Task2.py
- 
- Branch: Session_3  
-         DzmitryKolb
-              |___ Task1.py             
-              |___ Task2.py
+
+Utility provides the following interface:
+```shell
+usage: rss_reader.py [-h] [--version] [--json] [--verbose] [--limit LIMIT] [--date DATE] [--to-html] [--to-pdf] [source]
+
+Pure Python command-line RSS reader
+
+positional arguments:
+  source         Input RSS URL. Must starts with http[s]://
+
+optional arguments:
+  -h, --help     show this help message and exit
+  --version      Print version info
+  --json         Print result as JSON in stdout
+  --verbose      Outputs verbose status messages
+  --limit LIMIT  Limit news topics if this parameter provided
+  --date DATE    Retrieves news for the date, format: 'YYYYMMDD'
+  --to-html      Save result in HTML file
+  --to-pdf       Save result in PDF file
 
 ```
-1. When you finish your work on the task you should create Pull request to the appropriate branch of the main repo https://github.com/E-P-T/Homework (Docs: https://docs.github.com/en/github/collaborating-with-pull-requests/proposing-changes-to-your-work-with-pull-requests/creating-a-pull-request-from-a-fork)
 
-Please use the following instructions to prepare good description of the pull request:
+The utility with the --json argument prints news to standard output in the following format:
+```shell
+$ python rss_reader.py https://www.onliner.by/feed --json --limit 1
+{
+    "https://www.onliner.by/feed": {
+        "source_news": [
+            {
+                "title": " Подбежал, сделал замах, отбежал. В Гомеле подрались таксист и пешеход-«боксер»",
+                "pubdate": "Sat, 30 Oct 2021 18:14:44 +0300",
+                "description": "Не смогли мирно разойтись по своим сторонам водитель такси и… нет, не пассажир, а пешеход. Конфликт двух мужчин произошел в четверг, 28 октября. Видео рукопашного боя появилось в группе «ЧП. Гомель». И вам стоит посмотреть этот ролик. Читать далее…",
+                "links": [
+                    "https://auto.onliner.by/2021/10/30/v-gomele-podralis-taksist-i-peshexod-bokser",
+                    "https://content.onliner.by/news/thumbnail/6982f44cd2b92a3184e95121ae0371d3.jpeg",
+                    "https://vk.com/gomelchp?w=wall-131126363_267004"
+                ]
+            }
+        ],
+        "source_info": "Onliner. "
+    }
+}
+```
 
-Pull request header should be: Session <Number of the session> - <FirstName> <LastName>.
-> Example: Session 2 - Dzmitry Kolb 
+With the --to-pdf and --to-html arguments, the results are saved in the news.pdf and news.html files, respectively
 
-Pull request body: You should write here what tasks were implemented.
-> Example: Finished: Task 1.2, Task 1.3, Task 1.6      
+
+
+Installing:
+1. clone current repository.
+2. from directory with setup.py file star commant:
+   ```shell
+   pip  install .
+   ```
+   or from any directory:
+   ```shell
+   pip install [path/to/cloned/deirectory]
+   ```
+
+Run utility:
+```shell
+python rss_reader.py
+```
+
+or
+
+run from any directory:
+```shell
+rss_reader
+```
