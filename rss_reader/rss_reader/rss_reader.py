@@ -13,7 +13,7 @@ from contextlib import redirect_stderr
 from xhtml2pdf import pisa
 
 """Iteration"""
-VERSION = "1.4"
+VERSION = "1.5"
 
 db_path = "cached_news.db"
 html_result_file = "news.html"
@@ -44,12 +44,21 @@ class RSSReader:
     """RSSReader class.  Creates an object that includes a list of news items retrieved from source URL.
        and methods for presenting them based on command line arguments passed when creating of instance.
     """
-    def __init__(self, cli_arguments):
+    def __init__(self, cli_arguments, colored):
         self._arg_url = cli_arguments.source
         self._arg_limit = cli_arguments.limit
         self._arg_date = cli_arguments.date
         self._arg_to_html = cli_arguments.to_html
         self._arg_to_pdf = cli_arguments.to_pdf
+        self._colored = colored
+        if colored:
+            self.print_success = colored.print_success
+            self.print_info = colored.print_info
+            self.print_exception = colored.print_exceptions
+        else:
+            self.print_success = print
+            self.print_info = print
+            self.print_exception = print
         self._html_template = None
         if self._arg_date:
             self.news = self.fetch_news_from_cache()
@@ -72,13 +81,13 @@ class RSSReader:
 
     def get_data_from_source(self):
         """Sends a request and return response object"""
-        print(f"Receiving data from '{self._arg_url}' ...")
+        self.print_info(f"Receiving data from '{self._arg_url}' ...")
         try:
             response = request("GET", self._arg_url, headers={'User-agent': 'Mozilla/5.0'}, timeout=10)
         except Exception:
             raise RequestError(f"Error occurred while receiving data from '{self._arg_url}'.")
         else:
-            print(f"Data was received successfully from '{self._arg_url}'.")
+            self.print_success(f"Data was received successfully from '{self._arg_url}'.")
             return response
 
     @classmethod
@@ -105,8 +114,9 @@ class RSSReader:
             items = rss_channel.findAll('item')
             parsed_items_list = []
             if items:
-                print("Resource has {} news topics. {}".
-                      format(len(items), f"Display limit: {self._arg_limit}" if self._arg_limit else ""), '\n')
+                self.print_success("Resource has {} news topics. {}".
+                                   format(len(items), f"Display limit: {self._arg_limit}" if self._arg_limit else "") +
+                                   '\n')
                 if self._arg_limit is not None and self._arg_limit >= 0:
                     items = items[:self._arg_limit]
                 for item in items:
@@ -142,26 +152,38 @@ class RSSReader:
 
     def print_news(self):
         """Print given news topics in stdout"""
+        import table
         if not self.news:
             return
+        if sys.platform == "win32":
+            import ctypes
+            kernel32 = ctypes.windll.kernel32
+            kernel32.SetConsoleMode(kernel32.GetStdHandle(-11), 7)
+        row_names = ['Topic ', 'Date', 'Link', 'Description', 'Links']
+        table.get_max_column_width(row_names)
+        table.colored = self._colored
         try:
             for source_url, source_dump in self.news.items():
-                print("\n{:#^100}".format(" " + source_url + " "))
-                print("\n{:>12}: {}".format('Feed', source_dump['source_info']))
+                table.print_header(re.findall(r'//([A-Za-z0-9./]*)', source_url)[0])
+                table.print_row('Feed', source_dump['source_info'])
+                table.print_horizontal_border()
                 for item_num, item in enumerate(source_dump['source_news'], 1):
-                    print()
-                    print("{:>12}| {}".format('Topic ' + str(item_num), item["title"] or "Topic has no title"))
-                    print("{:>12}| {}".format('Date', item["pubdate"] or "Topic has no publication date"))
+                    table.print_row('Topic ' + str(item_num), item["title"] or "Topic has no title")
+                    table.print_horizontal_row_separator()
+                    table.print_row('Date', item["pubdate"] or "Topic has no publication date")
+                    table.print_horizontal_row_separator()
                     if item["links"]:
-                        print("{:>12}| {}".format('Link', item["links"].pop(0) or "Topic has no link"))
+                        table.print_row('Link', item["links"].pop(0) or "Topic has no link")
+                    table.print_horizontal_row_separator()
                     if item["description"]:
-                        print("{:>12}: {}".format('Description', BeautifulSoup(item["description"], 'lxml').get_text()))
+                        table.print_row('Description', BeautifulSoup(item["description"], 'lxml').get_text())
+                        # print('Description', BeautifulSoup(item["description"], 'lxml').get_text())
+                    table.print_horizontal_row_separator()
                     if item["links"]:
-                        print("{:>12}:".format("Links"))
-                        for i, lnk in enumerate(item["links"], 1):
-                            print("{:14} {}".format(i, lnk))
+                        table.print_row('Links', '\n'.join(f"{i}. {lnk}" for i, lnk in enumerate(item["links"], 1)))
+                    table.print_horizontal_border()
         except KeyError as k:
-            print(f"Object has incorrect structure for printing: {k}.")
+            self.print_exception(f"Object has incorrect structure for printing: {k}.")
 
     def print_json(self):
         """Prints news in json format in stdout."""
@@ -175,15 +197,15 @@ class RSSReader:
 
     def cache_news(self):
         """Stores news in local SQLite3 database."""
-        print("Caching news in the DB")
-        print("\tConnecting to the DB ...")
+        self.print_info("Caching news in the DB")
+        self.print_info("\tConnecting to the DB ...")
         if os.path.exists(db_path):
             db_exist = True
         else:
             db_exist = False
         connection = sqlite3.connect(db_path)
         cursor = connection.cursor()
-        print("\tConnection OK.")
+        self.print_success("\tConnection OK.")
         if not db_exist:
             cursor.execute("""PRAGMA foreign_keys = ON;""")
             cursor.execute("""CREATE TABLE IF NOT EXISTS source (
@@ -200,7 +222,7 @@ class RSSReader:
                                 CONSTRAINT unique_news UNIQUE (item_json),
                                 FOREIGN KEY (source_id) REFERENCES source(id)
                                 );""")
-        print("\t\tCaching news\n\t\t...")
+        self.print_info("\t\tCaching news\n\t\t...")
 
         next_id = cursor.execute("""SELECT id FROM news ORDER BY id DESC LIMIT 1""").fetchone()
         if next_id:
@@ -224,20 +246,20 @@ class RSSReader:
                                                              json.dumps(item, ensure_ascii=False)))
                 next_id = (added_id.lastrowid + 1) if added_id else next_id
         connection.commit()
-        print("\t\tNews saved in local DB.")
-        print("\tClosing connection to DB...")
+        self.print_success("\t\tNews saved in local DB.")
+        self.print_info("\tClosing connection to DB...")
         connection.close()
-        print("\tConnection closed.")
+        self.print_info("\tConnection closed.")
 
     def fetch_news_from_cache(self):
         """Retrieves news from local database for the date."""
         if os.path.exists(db_path):
-            print(f"Fetching news from the DB")
-            print("\tConnecting to DB ...")
+            self.print_info(f"Fetching news from the DB")
+            self.print_info("\tConnecting to DB ...")
             connection = sqlite3.connect(db_path)
-            print("\tConnection OK.")
-            print(f"\t\tFetching news for the date '{self._arg_date}'" +
-                  (f" for source '{self._arg_url}'" if self._arg_url else ""), "\n\t\t...")
+            self.print_success("\tConnection OK.")
+            self.print_info(f"\t\tFetching news for the date '{self._arg_date}'" +
+                            (f" for source '{self._arg_url}'" if self._arg_url else ""), "\n\t\t...")
             cursor = connection.cursor()
             dump = {}
             select_query = (f"""SELECT {'source.source_url,' if not self._arg_url else ''} news.item_json 
@@ -245,7 +267,7 @@ class RSSReader:
                             {'and source.source_url=(?)' if self._arg_url else ''} ORDER BY news.id DESC""",
                             (self._arg_date, self._arg_url) if self._arg_url else (self._arg_date,))
             select_result = cursor.execute(*select_query).fetchall()[:self._arg_limit]
-            print(f"\t\tFetched {len(select_result)} news from local DB.")
+            self.print_success(f"\t\tFetched {len(select_result)} news from local DB.")
             if not select_result:
                 raise NoNewsForDate(f"No news for the date '{self._arg_date}' in cache.")
             if self._arg_url:
@@ -262,9 +284,9 @@ class RSSReader:
                 dump[source]['source_news'] = news   # [::-1]
                 dump[source]['source_info'] = cursor.execute("""SELECT source_info FROM source WHERE source_url=(?)""",
                                                              (source,)).fetchone()[0]
-            print("\tClosing connection to DB...")
+            self.print_info("\tClosing connection to DB...")
             connection.close()
-            print("\tConnection closed.")
+            self.print_info("\tConnection closed.")
             return dump
         else:
             raise NoNewsForDate("No cached news yet.")
@@ -382,6 +404,7 @@ def parse_cli_arguments():
     arg_parser.add_argument('--date', type=str, default=None, help="Retrieves news for the date, format: 'YYYYMMDD'")
     arg_parser.add_argument('--to-html', action="store_true", help="Save result in HTML file")
     arg_parser.add_argument('--to-pdf', action="store_true", help="Save result in PDF file")
+    arg_parser.add_argument('--colored', action="store_true", help="Print colored result")
     return arg_parser
 
 
@@ -393,15 +416,22 @@ def main():
         return
     cli_arguments = arg_parse.parse_args()
     sys.stdout = sys.__stdout__ if cli_arguments.verbose else io.StringIO()
+    colored = None
+    if cli_arguments.colored:
+        import colors
+        print_exception = colors.print_exceptions
+        colored = colors
+    else:
+        print_exception = print
     try:
-        reader = RSSReader(cli_arguments)
+        reader = RSSReader(cli_arguments, colored)
         if cli_arguments.to_html:
             reader.convert2html()
         if cli_arguments.to_pdf:
             reader.convert2pdf()
     except Exception as e:
         sys.stdout = sys.__stdout__
-        print(e)
+        print_exception(e)
     else:
         sys.stdout = sys.__stdout__
         if cli_arguments.json:
